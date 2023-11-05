@@ -2,7 +2,23 @@ import os
 import torch
 from pipeline_zero1to3 import Zero1to3StableDiffusionPipeline
 from diffusers.utils import load_image
-import PIL
+from PIL import Image
+import pickle
+import numpy as np
+from skimage.io import imread
+
+def read_pickle(pkl_path):
+    with open(pkl_path, 'rb') as f:
+        return pickle.load(f)
+
+
+def load_im(path):
+    img = imread(path)
+    img = img.astype(np.float32) / 255.0
+    mask = img[:,:,3:]
+    img[:,:,:3] = img[:,:,:3] * mask + 1 - mask # white background
+    img = Image.fromarray(np.uint8(img[:, :, :3] * 255.))
+    return img
 
 model_id = "kxic/zero123-165000" # zero123-105000, zero123-165000, zero123-xl
 
@@ -15,16 +31,22 @@ pipe = pipe.to("cuda")
 
 num_images_per_prompt = 4
 
+
 # test inference pipeline
 # x y z, Polar angle (vertical rotation in degrees) 	Azimuth angle (horizontal rotation in degrees) 	Zoom (relative distance from center)
-query_pose = [45.0, 0.0, 0.0]
+cond_image = load_im("./data/condition/8d8d54678f0442ff977001bac1959615/015.png")
+K, azimuths, elevations, distances, cam_poses = read_pickle(os.path.join("./data/condition/8d8d54678f0442ff977001bac1959615", f'meta.pkl'))
+azi_cond = azimuths[15] * 180 / np.pi
+ele_cond = -elevations[15] * 180 / np.pi
 
-# for batch input
-input_image = load_image("./demo/4_blackarm.png") #load_image("https://cvlab-zero123-live.hf.space/file=/home/user/app/configs/4_blackarm.png")
+# to generate first view
+azi_target = 0
+ele_target = -30  # zero123 uses negative elevation!!! Actually it's 30 degree
 
-# for single input
+query_pose = [ele_target-ele_cond, azi_target-azi_cond, 0.0]
+
 H, W = (256, 256)
-input_images = [input_image.resize((H, W), PIL.Image.NEAREST)]
+input_images = [cond_image]
 query_poses = [query_pose]
 
 # infer pipeline, in original zero123 num_inference_steps=76
@@ -41,3 +63,4 @@ for obj in range(bs):
     for idx in range(num_images_per_prompt):
         images[i].save(os.path.join(log_dir,f"obj{obj}_{idx}.jpg"))
         i += 1
+
